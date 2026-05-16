@@ -31,40 +31,43 @@ async def async_register_static_files(hass: HomeAssistant):
         http://<ha>/haptique_ir_rf_hub/<file>
     """
 
-    # Correct integration path
     integration_path = hass.config.path("custom_components", DOMAIN)
-
-    # Correct source www directory INSIDE integration
     src_www = os.path.join(integration_path, "www")
+    dest = hass.config.path(f"www/community/{DOMAIN}")
 
-    if not os.path.isdir(src_www):
+    def _copy_static_files() -> tuple[bool, list[str]]:
+        """Perform blocking file IO in the executor."""
+        if not os.path.isdir(src_www):
+            return False, []
+
+        os.makedirs(dest, exist_ok=True)
+
+        copied: list[str] = []
+        for filename in os.listdir(src_www):
+            src_file = os.path.join(src_www, filename)
+            dest_file = os.path.join(dest, filename)
+            if os.path.isfile(src_file):
+                shutil.copy(src_file, dest_file)
+                copied.append(filename)
+        return True, copied
+
+    found, copied = await hass.async_add_executor_job(_copy_static_files)
+    if not found:
         _LOGGER.error("No www folder found inside integration! (%s)", src_www)
         return
 
-    # Destination inside HA www folder (HACS standard)
-    dest = hass.config.path(f"www/community/{DOMAIN}")
-    os.makedirs(dest, exist_ok=True)
+    for filename in copied:
+        _LOGGER.info("Copied %s → %s", filename, dest)
 
-    # Copy each file
-    for filename in os.listdir(src_www):
-        src_file = os.path.join(src_www, filename)
-        dest_file = os.path.join(dest, filename)
-
-        if os.path.isfile(src_file):
-            shutil.copy(src_file, dest_file)
-            _LOGGER.info("Copied %s → %s", src_file, dest_file)
-
-    # Register static URL path
     from homeassistant.components.http import StaticPathConfig
 
     await hass.http.async_register_static_paths([
         StaticPathConfig(
             f"/{DOMAIN}",
             dest,
-            False   # cache_headers
+            False,
         )
     ])
-
 
     _LOGGER.info("Static files served at: /%s/", DOMAIN)
 
